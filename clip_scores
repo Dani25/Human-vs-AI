@@ -1,0 +1,105 @@
+import os
+import pandas as pd
+from PIL import Image
+from transformers import CLIPProcessor, CLIPModel
+import torch
+from pathlib import Path
+from unidecode import unidecode
+
+# =========================
+# CONFIG
+# =========================
+DATASET_CSV = "dataset.csv"  # CSV file with the dataset
+IMAGES_ROOT = Path("path/to/T4SA/images/")  # folder containing T4SA images
+OUTPUT_FILE = "clip_scores.csv"
+MISSING_FILE = "missing_images.csv"
+TEXT_COLUMN = "AI_romanian"  # column for which CLIP score will be computed
+IMAGE_ID_COLUMN = "image_id"  # column with image filenames
+
+# =========================
+# LOAD CLIP MODEL
+# =========================
+print("📦 Loading CLIP model...")
+clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32")
+clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
+
+# =========================
+# UTILITY FUNCTIONS
+# =========================
+def find_image_path(image_id):
+    """
+    Search for the corresponding image in the T4SA image folder.
+    """
+    if pd.isna(image_id):
+        return None
+    base_name = str(image_id).strip()
+    for path in IMAGES_ROOT.rglob("*"):
+        if path.is_file():
+            if path.stem.lower() == base_name.lower():
+                return path
+    return None
+
+def clip_score(image_path, text):
+    """
+    Compute CLIP score for an image-text pair.
+    """
+    try:
+        image = Image.open(image_path).convert("RGB")
+        inputs = clip_processor(text=[text], images=image, return_tensors="pt", padding=True)
+        with torch.no_grad():
+            outputs = clip_model(**inputs)
+        return outputs.logits_per_image.item()
+    except Exception as e:
+        print(f"❌ Error with {image_path}: {e}")
+        return None
+
+# =========================
+# LOAD AND PREPARE DATA
+# =========================
+print("📂 Loading dataset...")
+df = pd.read_csv(DATASET_CSV)
+
+# Normalize text (remove diacritics, strip spaces, replace newlines)
+df[TEXT_COLUMN] = df[TEXT_COLUMN].fillna("").astype(str).apply(unidecode).str.replace("\n", " ").str.strip()
+
+# Search for images
+print("🔍 Searching for images...")
+df["img_path"] = df[IMAGE_ID_COLUMN].apply(find_image_path)
+
+# Save missing images list
+missing = df[df["img_path"].isnull()]
+if not missing.empty:
+    missing.to_csv(MISSING_FILE, index=False)
+    print(f"⚠️ Missing images saved in {MISSING_FILE}")
+
+# Keep only rows with found images
+df = df[df["img_path"].notnull()].copy()
+
+# =========================
+# CALCULATE CLIP SCORES
+# =========================
+print("📊 Calculating CLIP scores...")
+df["clip_score"] = df.apply(lambda row: clip_score(row["img_path"], row[TEXT_COLUMN]), axis=1)
+
+# Normalize CLIP scores (min-max normalization)
+valid_scores = df["clip_score"].dropna()
+if not valid_scores.empty:
+    min_score, max_score = valid_scores.min(), valid_scores.max()
+    df["clip_score_norm"] = df["clip_score"].apply(
+        lambda x: (x - min_score) / (max_score - min_score) if pd.notnull(x) else None
+    )
+else:
+    df["clip_score_norm"] = None
+
+# Matching / non-matching labeling
+df["clip_match"] = df["clip_score_norm"].apply(
+    lambda x: "matching" if pd.notnull(x) and x >= 0.5 else "not_matching"
+)
+
+# =========================
+# SAVE OUTPUT
+# =========================
+df[[IMAGE_ID_COLUMN, TEXT_COLUMN, "clip_score", "clip_score_norm", "clip_match"]].to_csv(
+    OUTPUT_FILE, index=False, encoding="utf-8"
+)
+print(f"✅ CLIP scores saved to: {OUTPUT_FILE}")
