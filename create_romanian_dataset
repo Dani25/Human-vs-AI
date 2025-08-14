@@ -1,0 +1,68 @@
+"""
+Dataset Preparation Script
+--------------------------
+This script processes a CSV file containing human-written and AI-generated
+Romanian text descriptions, cleans them, labels them for binary classification,
+and saves a ready-to-use dataset for machine learning experiments.
+
+Steps:
+1. Load the CSV file containing:
+    - human_romanian (human-written)
+    - AI_romanian (AI-generated)
+2. Clean the text (remove retweets, URLs, mentions, extra spaces).
+3. Assign binary labels: 0 = human, 1 = AI.
+4. Combine into a single dataset and save to a new CSV.
+"""
+
+import pandas as pd
+import re
+
+# ===== CONFIGURATION =====
+INPUT_PATH = "dataset.csv"  # Path to your dataset file
+OUTPUT_PATH = "ro_dataset_clasificare_human_vs_ai.csv"
+
+def clean_text(text):
+    """
+    Clean the input text by removing retweet markers, URLs, mentions, and extra spaces.
+    """
+    if not isinstance(text, str):
+        return ""
+    # Remove "RT @username:" at the start
+    text = re.sub(r'^RT\s+@\w+:?', '', text)
+    # Remove URLs
+    text = re.sub(r'https?://\S+', '', text)
+    # Remove mentions (@username)
+    text = re.sub(r'@\w+', '', text)
+    # Remove multiple spaces
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
+# ===== Load dataset =====
+df = pd.read_csv(INPUT_PATH)
+
+# Column names in original file
+human_col = 'human_romanian'
+ai_col = 'AI_romanian'
+
+# Clean human text
+df[human_col] = df[human_col].astype(str).apply(clean_text)
+
+# Create human dataset
+human_texts = df[[human_col]].copy()
+human_texts.columns = ['text']
+human_texts['label'] = 0  # 0 = human
+
+# Create AI dataset
+ai_texts = df[[ai_col]].copy()
+ai_texts.columns = ['text']
+ai_texts['label'] = 1  # 1 = AI
+
+# Combine datasets
+final_df = pd.concat([human_texts, ai_texts], ignore_index=True)
+
+# Drop empty rows
+final_df.dropna(subset=['text'], inplace=True)
+
+# Save processed dataset
+final_df.to_csv(OUTPUT_PATH, index=False, encoding='utf-8')
+print(f"✅ Dataset saved to {OUTPUT_PATH}")
