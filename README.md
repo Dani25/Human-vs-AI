@@ -14,3 +14,13 @@ Dataset and code for analyzing human-written and AI-generated image descriptions
 	• AI_english – AI-generated description in English (BLIP-2).
  
 	• AI_romanian – AI-generated description in Romanian (translated from AI_english using MarianMT).
+
+**clip_scores.py** computes semantic similarity scores between images and captions using the OpenAI CLIP model.
+
+	• Loads captions from dataset.csv (human/AI, English/Romanian).
+
+	• Searches for corresponding images (by image_id) in a local directory.
+
+	• Computes raw CLIP scores, applies min–max normalization, and labels each pair as matching or not_matching (threshold = 0.5).
+
+	• Saves results and logs missing images for review.
